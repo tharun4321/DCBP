@@ -1,23 +1,24 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-import subprocess
-import json
-import os
-import tempfile
-import threading
-import sqlite3
 from datetime import datetime
-import re
+import os
+import json
+import threading
+import subprocess
+import tempfile
 from pathlib import Path
 
+# --- Utility Frame for Responsiveness ---
 class ResponsiveFrame(ttk.Frame):
     """Custom frame that handles responsive behavior"""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, **kwargs)
+        # Binds the <Configure> event to the frame itself to trigger layout updates
         self.bind('<Configure>', self.on_configure)
         
     def on_configure(self, event):
-        """Handle window resize events"""
+        """Handle widget resize events (called recursively by the window)"""
+        # Only process event from the frame itself, not its children
         if event.widget == self:
             self.update_layout()
     
@@ -25,106 +26,36 @@ class ResponsiveFrame(ttk.Frame):
         """Override in subclasses for custom responsive behavior"""
         pass
 
-class SemgrepAnalyzer:
-    def __init__(self):
-        pass
-
-    def check_semgrep_installation(self):
-        try:
-            result = subprocess.run(
-                ['semgrep', '--version'], 
-                capture_output=True, 
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=10
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-            return False
-
-    def run_semgrep_analysis(self, file_path, language):
-        try:
-            # Semgrep command with proper encoding handling
-            cmd = [
-                'semgrep', 
-                '--config=auto', 
-                '--json', 
-                '--quiet',
-                file_path
-            ]
-            
-            # Fix encoding issue for Windows
-            result = subprocess.run(
-                cmd, 
-                capture_output=True, 
-                text=True, 
-                encoding='utf-8',  # Force UTF-8 encoding
-                errors='replace',  # Replace problematic characters
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                try:
-                    findings = json.loads(result.stdout)
-                    return findings.get('results', [])
-                except json.JSONDecodeError:
-                    return []
-            else:
-                # Log error but don't crash
-                print(f"Semgrep error: {result.stderr}")
-                return []
-            
-        except subprocess.TimeoutExpired:
-            print("Semgrep analysis timed out")
-            return []
-        except FileNotFoundError:
-            print("Semgrep not found. Please install semgrep first.")
-            return []
-        except Exception as e:
-            print(f"Error running semgrep: {e}")
-            return []
-
-    def analyze_code(self, file_path, language):
-        if not self.check_semgrep_installation():
-            print("Semgrep is not installed or not in PATH.")
-            return []
-
-        findings = self.run_semgrep_analysis(file_path, language)
-        return findings
-
+# --- Main GUI Class ---
 class ModernBugPredictionGUI:
-    def __init__(self, root):
+    def __init__(self, root, db_conn, db_cursor, analyzer):
         self.root = root
+        self.conn = db_conn    # Pass the existing DB connection
+        self.cursor = db_cursor # Pass the existing DB cursor
+        self.analyzer = analyzer # Pass the core logic class instance
+
         self.setup_window()
         self.setup_variables()
-        self.setup_database()
         self.create_modern_ui()
         self.setup_responsive_behavior()
         
+    # --- Setup Methods ---
+
     def setup_window(self):
         """Configure main window for 14-inch screen optimization"""
         self.root.title("🔍 Developer Centric Bug Prediction Model v2.0")
         
-        # Optimized for 14-inch screens (typically 1366x768 or 1920x1080)
+        # Calculate optimal window size (85% of screen for 14-inch displays)
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        
-        # Calculate optimal window size (85% of screen for 14-inch displays)
         window_width = int(screen_width * 0.85)
         window_height = int(screen_height * 0.85)
-        
-        # Center the window
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        self.root.minsize(1000, 700)  # Minimum size for usability
-        
-        # Configure window properties
+        self.root.minsize(1000, 700)
         self.root.configure(bg='#1e1e1e')
-        
-        # Make window resizable with proper weight distribution
         self.root.grid_rowconfigure(0, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         
@@ -139,30 +70,66 @@ class ModernBugPredictionGUI:
         self.min_severity = tk.StringVar(value="INFO")
         self.current_tab = tk.StringVar(value="analysis")
         
-    def setup_database(self):
-        """Initialize SQLite database"""
-        try:
-            self.conn = sqlite3.connect('bug_analysis.db')
-            self.cursor = self.conn.cursor()
-            self.cursor.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_results (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT,
-                    filename TEXT,
-                    language TEXT,
-                    total_vulnerabilities INTEGER,
-                    critical_count INTEGER,
-                    high_count INTEGER,
-                    medium_count INTEGER,
-                    low_count INTEGER,
-                    info_count INTEGER,
-                    results_json TEXT
-                )
-            ''')
-            self.conn.commit()
-        except Exception as e:
-            print(f"Database setup error: {e}")
-            
+    def setup_styles(self):
+        """Configure modern dark theme styles (omitted for brevity, assume original function content)"""
+        style = ttk.Style()
+        
+        # Configure dark theme
+        style.theme_use('clam')
+        
+        # Main frame style
+        style.configure('Main.TFrame', background='#1e1e1e')
+        
+        # Header style
+        style.configure('Header.TFrame', background='#2d2d2d', relief='raised', borderwidth=1)
+        style.configure('Header.TLabel', background='#2d2d2d', foreground='#ffffff', 
+                        font=('Segoe UI', 16, 'bold'))
+        
+        # Tab styles
+        style.configure('Custom.TNotebook', background='#1e1e1e', borderwidth=0)
+        style.configure('Custom.TNotebook.Tab', background='#3d3d3d', foreground='#ffffff',
+                        padding=[20, 10], font=('Segoe UI', 10))
+        style.map('Custom.TNotebook.Tab', 
+                  background=[('selected', '#0078d4'), ('active', '#4d4d4d')])
+        
+        # Button styles
+        style.configure('Primary.TButton', background='#0078d4', foreground='#ffffff',
+                        font=('Segoe UI', 10, 'bold'), padding=[15, 8])
+        style.map('Primary.TButton',
+                  background=[('active', '#106ebe'), ('pressed', '#005a9e')])
+        
+        style.configure('Secondary.TButton', background='#404040', foreground='#ffffff',
+                        font=('Segoe UI', 9), padding=[12, 6])
+        style.map('Secondary.TButton',
+                  background=[('active', '#505050'), ('pressed', '#303030')])
+        
+        # Frame styles
+        style.configure('Card.TFrame', background='#2d2d2d', relief='raised', borderwidth=1)
+        style.configure('Content.TFrame', background='#1e1e1e')
+        
+        # Label styles
+        style.configure('Title.TLabel', background='#1e1e1e', foreground='#ffffff',
+                        font=('Segoe UI', 12, 'bold'))
+        style.configure('Content.TLabel', background='#1e1e1e', foreground='#e0e0e0',
+                        font=('Segoe UI', 9))
+        style.configure('Success.TLabel', background='#1e1e1e', foreground='#4caf50',
+                        font=('Segoe UI', 9, 'bold'))
+        style.configure('Warning.TLabel', background='#1e1e1e', foreground='#ff9800',
+                        font=('Segoe UI', 9, 'bold'))
+        style.configure('Error.TLabel', background='#1e1e1e', foreground='#f44336',
+                        font=('Segoe UI', 9, 'bold'))
+        
+        # Entry and combobox styles
+        style.configure('Modern.TEntry', fieldbackground='#404040', foreground='#ffffff',
+                        borderwidth=1, insertcolor='#ffffff')
+        style.configure('Modern.TCombobox', fieldbackground='#404040', foreground='#ffffff',
+                        borderwidth=1)
+        
+        # Progressbar style
+        style.configure('Modern.Horizontal.TProgressbar', background='#0078d4',
+                        troughcolor='#404040', borderwidth=0, lightcolor='#0078d4',
+                        darkcolor='#0078d4')
+        
     def create_modern_ui(self):
         """Create the modern, responsive UI"""
         # Configure modern styling
@@ -182,67 +149,8 @@ class ModernBugPredictionGUI:
         
         # Status bar
         self.create_status_bar()
-        
-    def setup_styles(self):
-        """Configure modern dark theme styles"""
-        style = ttk.Style()
-        
-        # Configure dark theme
-        style.theme_use('clam')
-        
-        # Main frame style
-        style.configure('Main.TFrame', background='#1e1e1e')
-        
-        # Header style
-        style.configure('Header.TFrame', background='#2d2d2d', relief='raised', borderwidth=1)
-        style.configure('Header.TLabel', background='#2d2d2d', foreground='#ffffff', 
-                       font=('Segoe UI', 16, 'bold'))
-        
-        # Tab styles
-        style.configure('Custom.TNotebook', background='#1e1e1e', borderwidth=0)
-        style.configure('Custom.TNotebook.Tab', background='#3d3d3d', foreground='#ffffff',
-                       padding=[20, 10], font=('Segoe UI', 10))
-        style.map('Custom.TNotebook.Tab', 
-                 background=[('selected', '#0078d4'), ('active', '#4d4d4d')])
-        
-        # Button styles
-        style.configure('Primary.TButton', background='#0078d4', foreground='#ffffff',
-                       font=('Segoe UI', 10, 'bold'), padding=[15, 8])
-        style.map('Primary.TButton',
-                 background=[('active', '#106ebe'), ('pressed', '#005a9e')])
-        
-        style.configure('Secondary.TButton', background='#404040', foreground='#ffffff',
-                       font=('Segoe UI', 9), padding=[12, 6])
-        style.map('Secondary.TButton',
-                 background=[('active', '#505050'), ('pressed', '#303030')])
-        
-        # Frame styles
-        style.configure('Card.TFrame', background='#2d2d2d', relief='raised', borderwidth=1)
-        style.configure('Content.TFrame', background='#1e1e1e')
-        
-        # Label styles
-        style.configure('Title.TLabel', background='#1e1e1e', foreground='#ffffff',
-                       font=('Segoe UI', 12, 'bold'))
-        style.configure('Content.TLabel', background='#1e1e1e', foreground='#e0e0e0',
-                       font=('Segoe UI', 9))
-        style.configure('Success.TLabel', background='#1e1e1e', foreground='#4caf50',
-                       font=('Segoe UI', 9, 'bold'))
-        style.configure('Warning.TLabel', background='#1e1e1e', foreground='#ff9800',
-                       font=('Segoe UI', 9, 'bold'))
-        style.configure('Error.TLabel', background='#1e1e1e', foreground='#f44336',
-                       font=('Segoe UI', 9, 'bold'))
-        
-        # Entry and combobox styles
-        style.configure('Modern.TEntry', fieldbackground='#404040', foreground='#ffffff',
-                       borderwidth=1, insertcolor='#ffffff')
-        style.configure('Modern.TCombobox', fieldbackground='#404040', foreground='#ffffff',
-                       borderwidth=1)
-        
-        # Progressbar style
-        style.configure('Modern.Horizontal.TProgressbar', background='#0078d4',
-                       troughcolor='#404040', borderwidth=0, lightcolor='#0078d4',
-                       darkcolor='#0078d4')
-        
+
+    # --- UI Component Creation Methods (keep original function content) ---
     def create_header(self):
         """Create responsive header section"""
         header_frame = ttk.Frame(self.main_container, style='Header.TFrame')
@@ -262,9 +170,9 @@ class ModernBugPredictionGUI:
         
         ttk.Label(status_frame, text="Status:", style='Header.TLabel', font=('Segoe UI', 10)).pack(side='left')
         self.status_label = ttk.Label(status_frame, textvariable=self.analysis_status, 
-                                     style='Success.TLabel', font=('Segoe UI', 10, 'bold'))
+                                        style='Success.TLabel', font=('Segoe UI', 10, 'bold'))
         self.status_label.pack(side='left', padx=(5, 0))
-        
+
     def create_tabbed_interface(self):
         """Create responsive tabbed interface"""
         # Notebook for tabs
@@ -293,7 +201,6 @@ class ModernBugPredictionGUI:
         
     def create_analysis_tab(self):
         """Create responsive analysis tab"""
-        # Configure grid weights for responsiveness
         self.analysis_frame.grid_rowconfigure(1, weight=1)
         self.analysis_frame.grid_columnconfigure(0, weight=1)
         self.analysis_frame.grid_columnconfigure(1, weight=2)
@@ -326,7 +233,7 @@ class ModernBugPredictionGUI:
         
         # File path display
         self.file_entry = ttk.Entry(file_frame, textvariable=self.selected_file, 
-                                   style='Modern.TEntry', state='readonly')
+                                        style='Modern.TEntry', state='readonly')
         self.file_entry.grid(row=0, column=0, sticky='ew', padx=10, pady=10)
         
         # File buttons
@@ -337,11 +244,11 @@ class ModernBugPredictionGUI:
         button_frame.grid_columnconfigure(2, weight=1)
         
         ttk.Button(button_frame, text="📁 Select File", command=self.select_file,
-                  style='Secondary.TButton').grid(row=0, column=0, sticky='ew', padx=(0, 2))
+                    style='Secondary.TButton').grid(row=0, column=0, sticky='ew', padx=(0, 2))
         ttk.Button(button_frame, text="📂 Select Directory", command=self.select_directory,
-                  style='Secondary.TButton').grid(row=0, column=1, sticky='ew', padx=2)
+                    style='Secondary.TButton').grid(row=0, column=1, sticky='ew', padx=2)
         ttk.Button(button_frame, text="🗑️ Clear", command=self.clear_selection,
-                  style='Secondary.TButton').grid(row=0, column=2, sticky='ew', padx=(2, 0))
+                    style='Secondary.TButton').grid(row=0, column=2, sticky='ew', padx=(2, 0))
         
         # Code input section
         code_frame = ttk.LabelFrame(parent, text="Direct Code Input", style='Card.TFrame')
@@ -372,7 +279,7 @@ class ModernBugPredictionGUI:
             row=0, column=0, sticky='w', padx=10, pady=5)
         
         language_combo = ttk.Combobox(config_frame, textvariable=self.selected_language,
-                                     style='Modern.TCombobox', state='readonly')
+                                        style='Modern.TCombobox', state='readonly')
         language_combo['values'] = ('python', 'javascript', 'java', 'c', 'cpp', 'php', 'ruby', 'go', 'rust')
         language_combo.grid(row=0, column=1, sticky='ew', padx=(5, 10), pady=5)
         
@@ -381,7 +288,7 @@ class ModernBugPredictionGUI:
             row=1, column=0, sticky='w', padx=10, pady=5)
         
         severity_combo = ttk.Combobox(config_frame, textvariable=self.min_severity,
-                                     style='Modern.TCombobox', state='readonly')
+                                        style='Modern.TCombobox', state='readonly')
         severity_combo['values'] = ('INFO', 'WARNING', 'ERROR')
         severity_combo.grid(row=1, column=1, sticky='ew', padx=(5, 10), pady=5)
         
@@ -391,12 +298,12 @@ class ModernBugPredictionGUI:
         analyze_frame.grid_columnconfigure(0, weight=1)
         
         self.analyze_button = ttk.Button(analyze_frame, text="🔍 Analyze Code", 
-                                        command=self.start_analysis, style='Primary.TButton')
+                                            command=self.start_analysis, style='Primary.TButton')
         self.analyze_button.grid(row=0, column=0, sticky='ew')
         
         # Progress bar
         self.progress_bar = ttk.Progressbar(analyze_frame, style='Modern.Horizontal.TProgressbar',
-                                           mode='indeterminate')
+                                            mode='indeterminate')
         self.progress_bar.grid(row=1, column=0, sticky='ew', pady=(10, 0))
         
         # Make the parent expand properly
@@ -417,11 +324,11 @@ class ModernBugPredictionGUI:
         export_frame.grid(row=0, column=1, sticky='e')
         
         ttk.Button(export_frame, text="📄 JSON", command=lambda: self.export_results('json'),
-                  style='Secondary.TButton').pack(side='left', padx=2)
+                    style='Secondary.TButton').pack(side='left', padx=2)
         ttk.Button(export_frame, text="📊 CSV", command=lambda: self.export_results('csv'),
-                  style='Secondary.TButton').pack(side='left', padx=2)
+                    style='Secondary.TButton').pack(side='left', padx=2)
         ttk.Button(export_frame, text="🌐 HTML", command=lambda: self.export_results('html'),
-                  style='Secondary.TButton').pack(side='left', padx=2)
+                    style='Secondary.TButton').pack(side='left', padx=2)
         
         # Results display area
         results_container = ttk.Frame(parent, style='Card.TFrame')
@@ -478,7 +385,7 @@ class ModernBugPredictionGUI:
         
         # Placeholder for charts
         chart_placeholder = ttk.Label(charts_frame, text="📈 Vulnerability trends will be displayed here\n(Charts require matplotlib - install for full functionality)", 
-                                     style='Content.TLabel', anchor='center')
+                                        style='Content.TLabel', anchor='center')
         chart_placeholder.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
         
     def create_stat_card(self, parent, title, value, color, row, col):
@@ -493,12 +400,12 @@ class ModernBugPredictionGUI:
         
         # Value
         value_label = ttk.Label(card, text=value, style='Title.TLabel', anchor='center',
-                               font=('Segoe UI', 18, 'bold'))
+                                font=('Segoe UI', 18, 'bold'))
         value_label.grid(row=1, column=0, sticky='ew', padx=10, pady=(0, 10))
         
         # Store reference for updates
         setattr(self, f"{title.lower().replace(' ', '_')}_label", value_label)
-        
+
     def create_history_tab(self):
         """Create responsive history tab"""
         self.history_frame.grid_rowconfigure(1, weight=1)
@@ -513,7 +420,7 @@ class ModernBugPredictionGUI:
             row=0, column=0, sticky='w')
         
         ttk.Button(history_header, text="🔄 Refresh", command=self.refresh_history,
-                  style='Secondary.TButton').grid(row=0, column=1, sticky='e')
+                    style='Secondary.TButton').grid(row=0, column=1, sticky='e')
         
         # History list
         history_container = ttk.Frame(self.history_frame, style='Card.TFrame')
@@ -539,7 +446,7 @@ class ModernBugPredictionGUI:
         self.history_tree.grid(row=0, column=0, sticky='nsew', padx=10, pady=10)
         v_scrollbar.grid(row=0, column=1, sticky='ns', pady=10)
         h_scrollbar.grid(row=1, column=0, sticky='ew', padx=10)
-        
+
     def create_settings_tab(self):
         """Create responsive settings tab"""
         self.settings_frame.grid_columnconfigure(0, weight=1)
@@ -575,7 +482,7 @@ class ModernBugPredictionGUI:
             row=0, column=0, sticky='w', padx=15, pady=8)
         
         export_combo = ttk.Combobox(parent, values=['JSON', 'CSV', 'HTML'], 
-                                   style='Modern.TCombobox', state='readonly')
+                                        style='Modern.TCombobox', state='readonly')
         export_combo.set('JSON')
         export_combo.grid(row=0, column=1, sticky='ew', padx=(5, 15), pady=8)
         
@@ -601,7 +508,8 @@ class ModernBugPredictionGUI:
         # Version info
         ttk.Label(status_frame, text="v2.0 | Responsive UI", style='Content.TLabel').grid(
             row=0, column=1, sticky='e', padx=15, pady=8)
-            
+
+    # --- Responsive Behavior Methods ---
     def setup_responsive_behavior(self):
         """Setup responsive behavior for window resizing"""
         self.root.bind('<Configure>', self.on_window_resize)
@@ -609,38 +517,32 @@ class ModernBugPredictionGUI:
     def on_window_resize(self, event):
         """Handle window resize events"""
         if event.widget == self.root:
-            # Adjust UI elements based on window size
             width = self.root.winfo_width()
-            height = self.root.winfo_height()
             
             # Adjust font sizes for smaller screens
             if width < 1200:
-                # Smaller font for compact view
                 self.update_font_sizes('small')
             else:
-                # Normal font sizes
                 self.update_font_sizes('normal')
                 
     def update_font_sizes(self, size_mode):
         """Update font sizes based on screen size"""
         if size_mode == 'small':
-            # Smaller fonts for compact displays
             header_font = ('Segoe UI', 14, 'bold')
             title_font = ('Segoe UI', 10, 'bold')
             content_font = ('Segoe UI', 8)
         else:
-            # Normal fonts
             header_font = ('Segoe UI', 16, 'bold')
             title_font = ('Segoe UI', 12, 'bold')
             content_font = ('Segoe UI', 9)
             
-        # Update styles (this is a simplified version)
+        # Update styles
         style = ttk.Style()
         style.configure('Header.TLabel', font=header_font)
         style.configure('Title.TLabel', font=title_font)
         style.configure('Content.TLabel', font=content_font)
-        
-    # Analysis methods (keeping existing functionality)
+
+    # --- UI Action Methods ---
     def select_file(self):
         """Select a single file for analysis"""
         file_path = filedialog.askopenfilename(
@@ -657,7 +559,7 @@ class ModernBugPredictionGUI:
         )
         if file_path:
             self.selected_file.set(file_path)
-            self.code_text.delete(1.0, tk.END)  # Clear code input when file is selected
+            self.code_text.delete(1.0, tk.END)
             
     def select_directory(self):
         """Select a directory for bulk analysis"""
@@ -683,33 +585,32 @@ class ModernBugPredictionGUI:
         self.status_label.config(style='Warning.TLabel')
         
         # Start analysis in background thread
-        analysis_thread = threading.Thread(target=self.run_analysis)
+        analysis_thread = threading.Thread(target=self.run_analysis_logic)
         analysis_thread.daemon = True
         analysis_thread.start()
         
-    def run_analysis(self):
-        """Run the actual analysis"""
+    def run_analysis_logic(self):
+        """Call the core analysis function and handle UI update"""
         try:
-            # Determine input source
             code_content = self.code_text.get(1.0, tk.END).strip()
             file_path = self.selected_file.get()
+            language = self.selected_language.get()
             
-            if code_content and not file_path:
-                # Analyze direct code input
-                results = self.analyze_direct_code(code_content)
-            elif file_path and not code_content:
-                # Analyze selected file(s)
-                if file_path.startswith("Directory:"):
-                    dir_path = file_path.replace("Directory: ", "")
-                    results = self.analyze_directory(dir_path)
-                else:
-                    results = self.analyze_file(file_path)
-            elif code_content and file_path:
-                # Prioritize direct code input
-                results = self.analyze_direct_code(code_content)
-            else:
-                results = {"error": "No code or file selected for analysis"}
-                
+            # Offload the entire analysis logic to the analyzer class
+            results = self.analyzer.run_analysis(code_content, file_path, language, self.enable_semgrep.get())
+            
+            # Save analysis to database
+            if "error" not in results:
+                if "results" in results: # Directory analysis
+                     # Iterate through file results to save each one
+                    for file_result in results['results']:
+                        if 'summary' in file_result and 'vulnerabilities' in file_result:
+                            self.save_analysis_result(file_result['file'], file_result['summary'], file_result['vulnerabilities'])
+                else: # Single file/direct code
+                    if 'summary' in results and 'vulnerabilities' in results:
+                        filename = results.get('file', 'Direct Code Input')
+                        self.save_analysis_result(filename, results['summary'], results['vulnerabilities'])
+
             # Update UI in main thread
             self.root.after(0, self.display_results, results)
             
@@ -717,203 +618,123 @@ class ModernBugPredictionGUI:
             error_result = {"error": f"Analysis failed: {str(e)}"}
             self.root.after(0, self.display_results, error_result)
             
-    def analyze_direct_code(self, code_content):
-        """Analyze code content directly"""
-        try:
-            # Create temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix=f'.{self.selected_language.get()}', 
-                                           delete=False, encoding='utf-8') as temp_file:
-                temp_file.write(code_content)
-                temp_file_path = temp_file.name
-                
-            # Run analysis on temporary file
-            results = self.analyze_file(temp_file_path)
-            
-            # Clean up
-            os.unlink(temp_file_path)
-            
-            return results
-            
-        except Exception as e:
-            return {"error": f"Failed to analyze code: {str(e)}"}
-            
-    def analyze_file(self, file_path):
-        """Analyze a single file"""
-        try:
-            # Built-in vulnerability patterns
-            vulnerabilities = self.detect_vulnerabilities(file_path)
-            
-            # Add Semgrep analysis if enabled
-            if self.enable_semgrep.get():
-                semgrep_results = self.run_semgrep_analysis(file_path)
-                vulnerabilities.extend(semgrep_results)
-                
-            # Categorize by severity
-            categorized = self.categorize_vulnerabilities(vulnerabilities)
-            
-            # Save to database
-            self.save_analysis_result(file_path, categorized, vulnerabilities)
-            
-            return {
-                "file": file_path,
-                "vulnerabilities": vulnerabilities,
-                "summary": categorized,
-                "total": len(vulnerabilities)
-            }
-            
-        except Exception as e:
-            return {"error": f"Failed to analyze file {file_path}: {str(e)}"}
-            
-    def analyze_directory(self, dir_path):
-        """Analyze all files in a directory"""
-        results = []
-        supported_extensions = {'.py', '.js', '.java', '.c', '.cpp', '.php', '.rb', '.go', '.rs'}
+    def display_results(self, results):
+        """Display analysis results in the UI"""
+        # Stop progress bar and re-enable button
+        self.progress_bar.stop()
+        self.analyze_button.config(state='normal')
         
-        try:
-            for root, dirs, files in os.walk(dir_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if Path(file_path).suffix.lower() in supported_extensions:
-                        file_result = self.analyze_file(file_path)
-                        if "error" not in file_result:
-                            results.append(file_result)
-                            
-            return {
-                "directory": dir_path,
-                "files_analyzed": len(results),
-                "results": results,
-                "total_vulnerabilities": sum(r.get("total", 0) for r in results)
-            }
-            
-        except Exception as e:
-            return {"error": f"Failed to analyze directory {dir_path}: {str(e)}"}
-            
-    def detect_vulnerabilities(self, file_path):
-        """Detect vulnerabilities using built-in patterns"""
-        vulnerabilities = []
+        # Clear previous results
+        self.results_text.config(state='normal')
+        self.results_text.delete(1.0, tk.END)
         
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-                lines = content.split('\n')
-                
-            # Vulnerability patterns
-            patterns = {
-                'SQL Injection': [
-                    (r'(?i)(SELECT|INSERT|UPDATE|DELETE).*\+.*', 'String concatenation in SQL query'),
-                    (r'(?i)1\s*OR\s*1\s*=\s*1', 'Classic SQL injection pattern'),
-                    (r'(?i)UNION\s+SELECT', 'UNION-based SQL injection'),
-                    (r'(?i);\s*DROP\s+TABLE', 'SQL injection with DROP statement'),
-                ],
-                'Cross-Site Scripting (XSS)': [
-                    (r'innerHTML\s*=\s*[^;]*\+', 'Unsafe innerHTML assignment'),
-                    (r'document\.write\s*\([^)]*\+', 'Unsafe document.write usage'),
-                    (r'<script[^>]*>[^<]*</script>', 'Inline script tag'),
-                ],
-                'Command Injection': [
-                    (r'os\.system\s*\([^)]*\+', 'Command injection via os.system'),
-                    (r'subprocess\.[^(]*\([^)]*shell\s*=\s*True', 'Shell injection risk'),
-                    (r'eval\s*\([^)]*input', 'Code injection via eval'),
-                ],
-                'Path Traversal': [
-                    (r'\.\./', 'Directory traversal pattern'),
-                    (r'open\s*\([^)]*\+[^)]*["\'][^"\']*["\']', 'Unsafe file path construction'),
-                ],
-                'Hardcoded Credentials': [
-                    (r'(?i)(password|pwd|pass)\s*=\s*["\'][^"\']{3,}["\']', 'Hardcoded password'),
-                    (r'(?i)(api_key|apikey|secret)\s*=\s*["\'][^"\']{10,}["\']', 'Hardcoded API key'),
-                ],
-                'Weak Cryptography': [
-                    (r'hashlib\.md5\s*\(', 'Weak MD5 hash usage'),
-                    (r'hashlib\.sha1\s*\(', 'Weak SHA1 hash usage'),
-                    (r'(?i)DES|RC4', 'Weak encryption algorithm'),
-                ],
-                'Unsafe Deserialization': [
-                    (r'pickle\.loads?\s*\(', 'Unsafe pickle deserialization'),
-                    (r'yaml\.load\s*\([^)]*Loader', 'Unsafe YAML loading'),
-                ],
-                'Information Disclosure': [
-                    (r'(?i)debug\s*=\s*True', 'Debug mode enabled'),
-                    (r'print\s*\([^)]*password', 'Password in debug output'),
-                    (r'console\.log\s*\([^)]*token', 'Token in console output'),
-                ]
-            }
-            
-            # Scan for patterns
-            for vuln_type, pattern_list in patterns.items():
-                for pattern, description in pattern_list:
-                    for line_num, line in enumerate(lines, 1):
-                        if re.search(pattern, line):
-                            severity = self.get_severity(vuln_type)
-                            vulnerabilities.append({
-                                'type': vuln_type,
-                                'description': description,
-                                'line': line_num,
-                                'code': line.strip(),
-                                'severity': severity,
-                                'file': file_path
-                            })
-                            
-        except Exception as e:
-            print(f"Error detecting vulnerabilities: {e}")
-            
-        return vulnerabilities
-        
-    def get_severity(self, vuln_type):
-        """Get severity level for vulnerability type"""
-        critical_types = ['SQL Injection', 'Command Injection', 'Unsafe Deserialization', 'Hardcoded Credentials']
-        high_types = ['Cross-Site Scripting (XSS)', 'Path Traversal']
-        medium_types = ['Weak Cryptography', 'Information Disclosure']
-        
-        if vuln_type in critical_types:
-            return 'CRITICAL'
-        elif vuln_type in high_types:
-            return 'HIGH'
-        elif vuln_type in medium_types:
-            return 'MEDIUM'
+        if "error" in results:
+            self.results_text.insert(tk.END, f"❌ Error: {results['error']}\n", 'error')
+            self.analysis_status.set("Error")
+            self.status_label.config(style='Error.TLabel')
         else:
-            return 'LOW'
-            
-    def run_semgrep_analysis(self, file_path):
-        """Run Semgrep analysis if available"""
-        try:
-            cmd = ['semgrep', '--config=auto', '--json', '--quiet', file_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, 
-                                  encoding='utf-8', errors='replace', timeout=30)
-            
-            if result.returncode == 0:
-                findings = json.loads(result.stdout)
-                semgrep_vulns = []
+            # Display results
+            if "directory" in results:
+                self.display_directory_results(results)
+            else:
+                self.display_file_results(results)
+            self.analysis_status.set("Complete")
+            self.status_label.config(style='Success.TLabel')
+
+        self.results_text.config(state='disabled')
+        
+        # Update dashboard statistics
+        self.update_dashboard_stats()
+        
+    def display_file_results(self, results):
+        """Display results for single file analysis (omitted for brevity, assume original function content)"""
+        file_name = os.path.basename(results.get('file', 'Direct Code Input'))
+        total_vulns = results.get('total', 0)
+        
+        # Header
+        self.results_text.insert(tk.END, f"🔍 Analysis Results for: {file_name}\n", 'header')
+        self.results_text.insert(tk.END, "=" * 60 + "\n\n", 'header')
+        
+        # Summary
+        summary = results.get('summary', {})
+        self.results_text.insert(tk.END, f"📊 Summary:\n", 'header')
+        self.results_text.insert(tk.END, f" \tTotal Vulnerabilities: {total_vulns}\n")
+        
+        for severity, count in summary.items():
+            if count > 0:
+                tag = severity.lower()
+                self.results_text.insert(tk.END, f" \t{severity}: {count}\n", tag)
                 
-                for finding in findings.get('results', []):
-                    semgrep_vulns.append({
-                        'type': finding.get('check_id', 'Unknown'),
-                        'description': finding.get('extra', {}).get('message', 'Semgrep finding'),
-                        'line': finding.get('start', {}).get('line', 0),
-                        'code': finding.get('extra', {}).get('lines', ''),
-                        'severity': finding.get('extra', {}).get('severity', 'INFO').upper(),
-                        'file': file_path,
-                        'source': 'Semgrep'
-                    })
+        self.results_text.insert(tk.END, "\n")
+        
+        # Detailed findings
+        vulnerabilities = results.get('vulnerabilities', [])
+        if vulnerabilities:
+            self.results_text.insert(tk.END, "🔍 Detailed Findings:\n", 'header')
+            self.results_text.insert(tk.END, "-" * 40 + "\n\n")
+            
+            for i, vuln in enumerate(vulnerabilities, 1):
+                severity = vuln.get('severity', 'INFO')
+                tag = severity.lower()
+                
+                self.results_text.insert(tk.END, f"{i}. ", 'header')
+                self.results_text.insert(tk.END, f"[{severity}] ", tag)
+                self.results_text.insert(tk.END, f"{vuln.get('type', 'Unknown')}\n")
+                self.results_text.insert(tk.END, f" \tDescription: {vuln.get('description', 'No description')}\n")
+                self.results_text.insert(tk.END, f" \tLine: {vuln.get('line', 'Unknown')}\n")
+                self.results_text.insert(tk.END, f" \tCode: {vuln.get('code', 'No code snippet')}\n")
+                if vuln.get('source'):
+                    self.results_text.insert(tk.END, f" \tSource: {vuln.get('source')}\n")
+                self.results_text.insert(tk.END, "\n")
+        else:
+            self.results_text.insert(tk.END, "✅ No vulnerabilities detected!\n", 'info')
+        
+    def display_directory_results(self, results):
+        """Display results for directory analysis (omitted for brevity, assume original function content)"""
+        dir_name = os.path.basename(results.get('directory', 'Unknown'))
+        files_analyzed = results.get('files_analyzed', 0)
+        total_vulns = results.get('total_vulnerabilities', 0)
+        
+        # Header
+        self.results_text.insert(tk.END, f"📂 Directory Analysis: {dir_name}\n", 'header')
+        self.results_text.insert(tk.END, "=" * 60 + "\n\n", 'header')
+        
+        # Summary
+        self.results_text.insert(tk.END, f"📊 Summary:\n", 'header')
+        self.results_text.insert(tk.END, f" \tFiles Analyzed: {files_analyzed}\n")
+        self.results_text.insert(tk.END, f" \tTotal Vulnerabilities: {total_vulns}\n\n")
+        
+        # Per-file results
+        file_results = results.get('results', [])
+        if file_results:
+            self.results_text.insert(tk.END, "📋 Per-File Results:\n", 'header')
+            self.results_text.insert(tk.END, "-" * 40 + "\n\n")
+            
+            for file_result in file_results:
+                file_name = os.path.basename(file_result.get('file', 'Unknown'))
+                file_vulns = file_result.get('total', 0)
+                
+                if file_vulns > 0:
+                    self.results_text.insert(tk.END, f"📄 {file_name}: ", 'header')
+                    self.results_text.insert(tk.END, f"{file_vulns} vulnerabilities\n", 'warning')
                     
-                return semgrep_vulns
-                
-        except Exception as e:
-            print(f"Semgrep analysis failed: {e}")
-            
-        return []
-        
-    def categorize_vulnerabilities(self, vulnerabilities):
-        """Categorize vulnerabilities by severity"""
-        categories = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'INFO': 0}
-        
-        for vuln in vulnerabilities:
-            severity = vuln.get('severity', 'INFO')
-            if severity in categories:
-                categories[severity] += 1
-                
-        return categories
-        
+                    # Show top vulnerabilities for this file
+                    vulns = file_result.get('vulnerabilities', [])[:3]  # Show top 3
+                    for vuln in vulns:
+                        severity = vuln.get('severity', 'INFO')
+                        tag = severity.lower()
+                        self.results_text.insert(tk.END, f" \t\t• ", 'content')
+                        self.results_text.insert(tk.END, f"[{severity}] ", tag)
+                        self.results_text.insert(tk.END, f"{vuln.get('type', 'Unknown')}\n")
+                    
+                    if len(file_result.get('vulnerabilities', [])) > 3:
+                        remaining = len(file_result.get('vulnerabilities', [])) - 3
+                        self.results_text.insert(tk.END, f" \t\t... and {remaining} more\n")
+                    self.results_text.insert(tk.END, "\n")
+        else:
+            self.results_text.insert(tk.END, "✅ No vulnerabilities detected in any files!\n", 'info')
+
+    # --- Database and Dashboard Methods (part of the GUI's responsibility to display/manage its data) ---
     def save_analysis_result(self, filename, summary, vulnerabilities):
         """Save analysis result to database"""
         try:
@@ -935,125 +756,10 @@ class ModernBugPredictionGUI:
             
         except Exception as e:
             print(f"Database save error: {e}")
-            
-    def display_results(self, results):
-        """Display analysis results in the UI"""
-        # Stop progress bar and re-enable button
-        self.progress_bar.stop()
-        self.analyze_button.config(state='normal')
-        self.analysis_status.set("Complete")
-        self.status_label.config(style='Success.TLabel')
-        
-        # Clear previous results
-        self.results_text.config(state='normal')
-        self.results_text.delete(1.0, tk.END)
-        
-        if "error" in results:
-            self.results_text.insert(tk.END, f"❌ Error: {results['error']}\n", 'error')
-        else:
-            # Display results
-            if "directory" in results:
-                self.display_directory_results(results)
-            else:
-                self.display_file_results(results)
-                
-        self.results_text.config(state='disabled')
-        
-        # Update dashboard statistics
-        self.update_dashboard_stats()
-        
-    def display_file_results(self, results):
-        """Display results for single file analysis"""
-        file_name = os.path.basename(results.get('file', 'Direct Code Input'))
-        total_vulns = results.get('total', 0)
-        
-        # Header
-        self.results_text.insert(tk.END, f"🔍 Analysis Results for: {file_name}\n", 'header')
-        self.results_text.insert(tk.END, "=" * 60 + "\n\n", 'header')
-        
-        # Summary
-        summary = results.get('summary', {})
-        self.results_text.insert(tk.END, f"📊 Summary:\n", 'header')
-        self.results_text.insert(tk.END, f"  Total Vulnerabilities: {total_vulns}\n")
-        
-        for severity, count in summary.items():
-            if count > 0:
-                tag = severity.lower()
-                self.results_text.insert(tk.END, f"  {severity}: {count}\n", tag)
-                
-        self.results_text.insert(tk.END, "\n")
-        
-        # Detailed findings
-        vulnerabilities = results.get('vulnerabilities', [])
-        if vulnerabilities:
-            self.results_text.insert(tk.END, "🔍 Detailed Findings:\n", 'header')
-            self.results_text.insert(tk.END, "-" * 40 + "\n\n")
-            
-            for i, vuln in enumerate(vulnerabilities, 1):
-                severity = vuln.get('severity', 'INFO')
-                tag = severity.lower()
-                
-                self.results_text.insert(tk.END, f"{i}. ", 'header')
-                self.results_text.insert(tk.END, f"[{severity}] ", tag)
-                self.results_text.insert(tk.END, f"{vuln.get('type', 'Unknown')}\n")
-                self.results_text.insert(tk.END, f"   Description: {vuln.get('description', 'No description')}\n")
-                self.results_text.insert(tk.END, f"   Line: {vuln.get('line', 'Unknown')}\n")
-                self.results_text.insert(tk.END, f"   Code: {vuln.get('code', 'No code snippet')}\n")
-                if vuln.get('source'):
-                    self.results_text.insert(tk.END, f"   Source: {vuln.get('source')}\n")
-                self.results_text.insert(tk.END, "\n")
-        else:
-            self.results_text.insert(tk.END, "✅ No vulnerabilities detected!\n", 'info')
-            
-    def display_directory_results(self, results):
-        """Display results for directory analysis"""
-        dir_name = os.path.basename(results.get('directory', 'Unknown'))
-        files_analyzed = results.get('files_analyzed', 0)
-        total_vulns = results.get('total_vulnerabilities', 0)
-        
-        # Header
-        self.results_text.insert(tk.END, f"📂 Directory Analysis: {dir_name}\n", 'header')
-        self.results_text.insert(tk.END, "=" * 60 + "\n\n", 'header')
-        
-        # Summary
-        self.results_text.insert(tk.END, f"📊 Summary:\n", 'header')
-        self.results_text.insert(tk.END, f"  Files Analyzed: {files_analyzed}\n")
-        self.results_text.insert(tk.END, f"  Total Vulnerabilities: {total_vulns}\n\n")
-        
-        # Per-file results
-        file_results = results.get('results', [])
-        if file_results:
-            self.results_text.insert(tk.END, "📋 Per-File Results:\n", 'header')
-            self.results_text.insert(tk.END, "-" * 40 + "\n\n")
-            
-            for file_result in file_results:
-                file_name = os.path.basename(file_result.get('file', 'Unknown'))
-                file_vulns = file_result.get('total', 0)
-                
-                if file_vulns > 0:
-                    self.results_text.insert(tk.END, f"📄 {file_name}: ", 'header')
-                    self.results_text.insert(tk.END, f"{file_vulns} vulnerabilities\n", 'warning')
-                    
-                    # Show top vulnerabilities for this file
-                    vulns = file_result.get('vulnerabilities', [])[:3]  # Show top 3
-                    for vuln in vulns:
-                        severity = vuln.get('severity', 'INFO')
-                        tag = severity.lower()
-                        self.results_text.insert(tk.END, f"    • ", 'content')
-                        self.results_text.insert(tk.END, f"[{severity}] ", tag)
-                        self.results_text.insert(tk.END, f"{vuln.get('type', 'Unknown')}\n")
-                    
-                    if len(file_result.get('vulnerabilities', [])) > 3:
-                        remaining = len(file_result.get('vulnerabilities', [])) - 3
-                        self.results_text.insert(tk.END, f"    ... and {remaining} more\n")
-                    self.results_text.insert(tk.END, "\n")
-        else:
-            self.results_text.insert(tk.END, "✅ No vulnerabilities detected in any files!\n", 'info')
-            
+
     def update_dashboard_stats(self):
         """Update dashboard statistics"""
         try:
-            # Get statistics from database
             self.cursor.execute('SELECT COUNT(*) FROM analysis_results')
             total_scans = self.cursor.fetchone()[0]
             
@@ -1063,7 +769,6 @@ class ModernBugPredictionGUI:
             self.cursor.execute('SELECT COUNT(DISTINCT filename) FROM analysis_results')
             files_analyzed = self.cursor.fetchone()[0]
             
-            # Calculate success rate (scans with no critical issues)
             self.cursor.execute('SELECT COUNT(*) FROM analysis_results WHERE critical_count = 0')
             successful_scans = self.cursor.fetchone()[0]
             success_rate = (successful_scans / total_scans * 100) if total_scans > 0 else 0
@@ -1080,7 +785,7 @@ class ModernBugPredictionGUI:
                 
         except Exception as e:
             print(f"Error updating dashboard stats: {e}")
-            
+
     def refresh_history(self):
         """Refresh the history display"""
         try:
@@ -1091,7 +796,7 @@ class ModernBugPredictionGUI:
             # Fetch recent analysis results
             self.cursor.execute('''
                 SELECT timestamp, filename, language, total_vulnerabilities, 
-                       critical_count, high_count 
+                        critical_count, high_count 
                 FROM analysis_results 
                 ORDER BY timestamp DESC 
                 LIMIT 100
@@ -1161,10 +866,15 @@ class ModernBugPredictionGUI:
         result = self.cursor.fetchone()
         
         if result:
+            # Re-format JSON string nicely
+            data = json.loads(result[0])
+            export_data = {
+                "timestamp": datetime.now().isoformat(),
+                "results": data
+            }
             with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(result[0])
+                 json.dump(export_data, f, indent=2)
         else:
-            # Fallback to empty results
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump({"message": "No analysis results available"}, f, indent=2)
                 
@@ -1172,10 +882,9 @@ class ModernBugPredictionGUI:
         """Export results as CSV"""
         import csv
         
-        # Get all analysis results
         self.cursor.execute('''
             SELECT timestamp, filename, language, total_vulnerabilities,
-                   critical_count, high_count, medium_count, low_count, info_count
+                    critical_count, high_count, medium_count, low_count, info_count
             FROM analysis_results ORDER BY timestamp DESC
         ''')
         
@@ -1184,7 +893,7 @@ class ModernBugPredictionGUI:
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(['Timestamp', 'Filename', 'Language', 'Total Vulnerabilities',
-                           'Critical', 'High', 'Medium', 'Low', 'Info'])
+                            'Critical', 'High', 'Medium', 'Low', 'Info'])
             writer.writerows(results)
             
     def export_html(self, file_path):
@@ -1262,21 +971,3 @@ class ModernBugPredictionGUI:
         
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(html_content)
-            
-    def __del__(self):
-        """Cleanup database connection"""
-        if hasattr(self, 'conn'):
-            self.conn.close()
-
-def main():
-    """Main function to run the application"""
-    root = tk.Tk()
-    app = ModernBugPredictionGUI(root)
-    
-    # Load history on startup
-    root.after(1000, app.refresh_history)
-    
-    root.mainloop()
-
-if __name__ == "__main__":
-    main()
